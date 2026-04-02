@@ -1,0 +1,55 @@
+version: 2
+
+project_name: overcf
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/overcf
+    binary: overcf
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/OverseedAI/overcf/internal/cli.version={{.Version}}
+      - -X github.com/OverseedAI/overcf/internal/cli.commit={{.Commit}}
+      - -X github.com/OverseedAI/overcf/internal/cli.date={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+brews:
+  - repository:
+      owner: OverseedAI
+      name: homebrew-tap
+    homepage: https://github.com/OverseedAI/overcf
+    description: Cloudflare CLI for managing DNS and zones
+    license: MIT
+    install: |
+      bin.install "overcf"
+    test: |
+      system "#{bin}/overcf", "--version"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
