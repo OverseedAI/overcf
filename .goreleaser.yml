@@ -35,9 +35,11 @@ brews:
   - repository:
       owner: OverseedAI
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: https://github.com/OverseedAI/overcf
     description: Cloudflare CLI for managing DNS and zones
     license: MIT
+    skip_upload: auto
     install: |
       bin.install "overcf"
     test: |
