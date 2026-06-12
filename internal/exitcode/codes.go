@@ -27,6 +27,9 @@ const (
 
 	// NetworkError indicates a network connectivity issue.
 	NetworkError = 7
+
+	// Cancelled indicates the user refused or did not confirm an operation.
+	Cancelled = 8
 )
 
 // ErrorCode maps error codes to their string representations for JSON output.
@@ -39,4 +42,5 @@ var ErrorCode = map[int]string{
 	RateLimited:     "RATE_LIMITED",
 	Conflict:        "CONFLICT",
 	NetworkError:    "NETWORK_ERROR",
+	Cancelled:       "CANCELLED",
 }

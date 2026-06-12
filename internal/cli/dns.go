@@ -9,9 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cloudflare/cloudflare-go/v4"
-	"github.com/cloudflare/cloudflare-go/v4/dns"
-	"github.com/spf13/cobra"
 	"github.com/OverseedAI/overcf/internal/client"
 	"github.com/OverseedAI/overcf/internal/config"
 	"github.com/OverseedAI/overcf/internal/confirm"
@@ -19,6 +16,9 @@ import (
 	"github.com/OverseedAI/overcf/internal/output"
 	"github.com/OverseedAI/overcf/internal/resolver"
 	"github.com/OverseedAI/overcf/internal/types"
+	"github.com/cloudflare/cloudflare-go/v4"
+	"github.com/cloudflare/cloudflare-go/v4/dns"
+	"github.com/spf13/cobra"
 )
 
 var dnsCmd = &cobra.Command{
@@ -710,6 +710,7 @@ var dnsDeleteCmd = &cobra.Command{
 		target := fmt.Sprintf("%s %s -> %s", record.Type, record.Name, record.Content)
 		if !confirm.Destructive("delete", target, flagYes) {
 			fmt.Println("Cancelled.")
+			os.Exit(exitcode.Cancelled)
 			return nil
 		}
 

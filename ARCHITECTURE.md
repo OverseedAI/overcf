@@ -91,6 +91,7 @@ const (
     RateLimited     = 5
     Conflict        = 6
     NetworkError    = 7
+    Cancelled       = 8
 )
 ```
 

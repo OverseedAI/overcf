@@ -6,6 +6,7 @@ package integration
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -113,6 +114,22 @@ func dataList(t *testing.T, stdout string) []any {
 		t.Fatalf("expected data array, got: %s", stdout)
 	}
 	return data
+}
+
+func createTestRecord(t *testing.T, fake *fakeCF, name string, content string) string {
+	t.Helper()
+
+	res := runCLI(t, fake, "", "dns", "create", testZoneName,
+		"--type", "A", "--name", name, "--content", content, "--json")
+	if res.code != 0 {
+		t.Fatalf("create %s failed with exit code %d, stderr: %s", name, res.code, res.stderr)
+	}
+
+	recordID, _ := dataObject(t, res.stdout)["id"].(string)
+	if recordID == "" {
+		t.Fatalf("create %s output missing record ID: %s", name, res.stdout)
+	}
+	return recordID
 }
 
 func TestZoneList(t *testing.T) {
@@ -310,6 +327,133 @@ func TestDNSCreateInvalidIPFailsValidation(t *testing.T) {
 	}
 }
 
+func TestDNSExportJSONAndCSV(t *testing.T) {
+	fake := newFakeCF()
+	defer fake.close()
+
+	firstID := createTestRecord(t, fake, "www", "192.0.2.1")
+	secondID := createTestRecord(t, fake, "api", "192.0.2.2")
+
+	res := runCLI(t, fake, "", "dns", "export", testZoneName, "--json")
+	if res.code != 0 {
+		t.Fatalf("json export failed with exit code %d, stderr: %s", res.code, res.stderr)
+	}
+
+	records := dataList(t, res.stdout)
+	if len(records) != 2 {
+		t.Fatalf("expected 2 exported records, got %d: %s", len(records), res.stdout)
+	}
+	if records[0].(map[string]any)["id"] != firstID || records[1].(map[string]any)["id"] != secondID {
+		t.Errorf("exported records not in creation order: %v", records)
+	}
+
+	res = runCLI(t, fake, "", "dns", "export", testZoneName, "--format", "csv")
+	if res.code != 0 {
+		t.Fatalf("csv export failed with exit code %d, stderr: %s", res.code, res.stderr)
+	}
+
+	reader := csv.NewReader(strings.NewReader(res.stdout))
+	rows, err := reader.ReadAll()
+	if err != nil {
+		t.Fatalf("invalid CSV export: %v\noutput: %s", err, res.stdout)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("expected header plus 2 rows, got %d: %v", len(rows), rows)
+	}
+	if strings.Join(rows[0], ",") != "ID,TYPE,NAME,CONTENT,TTL,PROXIED,PRIORITY,PORT,WEIGHT,TARGET,FLAGS,TAG,VALUE" {
+		t.Fatalf("unexpected CSV header: %v", rows[0])
+	}
+	if rows[1][0] != firstID || rows[1][2] != "www" || rows[1][3] != "192.0.2.1" {
+		t.Errorf("unexpected first CSV record: %v", rows[1])
+	}
+}
+
+func TestDNSImportJSONCreatesUpdatesSkipsAndReplaces(t *testing.T) {
+	fake := newFakeCF()
+	defer fake.close()
+
+	updateID := createTestRecord(t, fake, "www", "192.0.2.1")
+	keepID := createTestRecord(t, fake, "api", "192.0.2.10")
+	deleteID := createTestRecord(t, fake, "old", "192.0.2.99")
+
+	payload := fmt.Sprintf(`[
+  {"id":%q,"type":"A","name":"www","content":"192.0.2.2","ttl":300},
+  {"type":"A","name":"api","content":"192.0.2.10"},
+  {"type":"TXT","name":"_verify","content":"token=abc123","ttl":120}
+]`, updateID)
+
+	res := runCLI(t, fake, payload, "dns", "import", testZoneName, "--stdin", "--replace", "--yes", "--json")
+	if res.code != 0 {
+		t.Fatalf("json import failed with exit code %d, stderr: %s", res.code, res.stderr)
+	}
+
+	result := dataObject(t, res.stdout)
+	if result["created"] != float64(1) || result["updated"] != float64(1) || result["skipped"] != float64(1) || result["deleted"] != float64(1) {
+		t.Fatalf("unexpected import result: %v\nstdout: %s", result, res.stdout)
+	}
+
+	if fake.recordCount() != 3 {
+		t.Fatalf("expected 3 records after replace import, got %d", fake.recordCount())
+	}
+	if fake.sawRequest("GET /zones/" + testZoneID + "/dns_records/" + deleteID) {
+		t.Error("replace import should not fetch deleted record individually")
+	}
+	if !fake.sawRequest("DELETE /zones/" + testZoneID + "/dns_records/" + deleteID) {
+		t.Error("replace import did not delete omitted record")
+	}
+
+	res = runCLI(t, fake, "", "dns", "get", testZoneName, updateID, "--json")
+	updated := dataObject(t, res.stdout)
+	if updated["content"] != "192.0.2.2" || updated["ttl"] != float64(300) {
+		t.Errorf("existing record not updated from import: %v", updated)
+	}
+
+	res = runCLI(t, fake, "", "dns", "get", testZoneName, keepID, "--json")
+	kept := dataObject(t, res.stdout)
+	if kept["content"] != "192.0.2.10" {
+		t.Errorf("matching import record should have been kept: %v", kept)
+	}
+}
+
+func TestDNSImportCSVCreatesRecords(t *testing.T) {
+	fake := newFakeCF()
+	defer fake.close()
+
+	payload := "type,name,content,ttl,proxied\n" +
+		"A,www,192.0.2.1,300,true\n" +
+		"TXT,_verify,token=abc123,120,false\n"
+
+	res := runCLI(t, fake, payload, "dns", "import", testZoneName, "--stdin", "--input-format", "csv", "--json")
+	if res.code != 0 {
+		t.Fatalf("csv import failed with exit code %d, stderr: %s", res.code, res.stderr)
+	}
+
+	result := dataObject(t, res.stdout)
+	if result["created"] != float64(2) || result["updated"] != float64(0) || result["skipped"] != float64(0) {
+		t.Fatalf("unexpected CSV import result: %v", result)
+	}
+
+	res = runCLI(t, fake, "", "dns", "export", testZoneName, "--format", "csv")
+	if res.code != 0 {
+		t.Fatalf("csv export after import failed with exit code %d, stderr: %s", res.code, res.stderr)
+	}
+	reader := csv.NewReader(strings.NewReader(res.stdout))
+	header, err := reader.Read()
+	if err != nil {
+		t.Fatalf("failed to read CSV export header: %v", err)
+	}
+	if strings.Join(header[:5], ",") != "ID,TYPE,NAME,CONTENT,TTL" {
+		t.Fatalf("unexpected CSV export header: %v", header)
+	}
+	rows, err := reader.ReadAll()
+	if err != nil {
+		t.Fatalf("failed to read CSV export rows: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 imported records in export, got %d: %v", len(rows), rows)
+	}
+}
+
 func TestDNSDeleteWithoutYesIsRefusedNonInteractive(t *testing.T) {
 	fake := newFakeCF()
 	defer fake.close()
@@ -319,6 +463,9 @@ func TestDNSDeleteWithoutYesIsRefusedNonInteractive(t *testing.T) {
 	recordID := dataObject(t, res.stdout)["id"].(string)
 
 	res = runCLI(t, fake, "", "dns", "delete", testZoneName, recordID)
+	if res.code != 8 {
+		t.Errorf("expected exit code 8 (Cancelled) without confirmation, got %d", res.code)
+	}
 	if !strings.Contains(res.stderr, "--yes") {
 		t.Errorf("expected stderr to mention --yes, got: %s", res.stderr)
 	}

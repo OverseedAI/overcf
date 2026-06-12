@@ -12,15 +12,15 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cloudflare/cloudflare-go/v4"
-	"github.com/cloudflare/cloudflare-go/v4/dns"
-	"github.com/spf13/cobra"
 	"github.com/OverseedAI/overcf/internal/client"
 	"github.com/OverseedAI/overcf/internal/config"
 	"github.com/OverseedAI/overcf/internal/confirm"
 	"github.com/OverseedAI/overcf/internal/exitcode"
 	"github.com/OverseedAI/overcf/internal/resolver"
 	"github.com/OverseedAI/overcf/internal/types"
+	"github.com/cloudflare/cloudflare-go/v4"
+	"github.com/cloudflare/cloudflare-go/v4/dns"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -252,6 +252,7 @@ CSV accepts headers: id,type,name,content,ttl,proxied,priority,port,weight,targe
 			if len(deleteRecords) > 0 {
 				if !confirm.DestructiveMultiple("delete", deleteTargets, flagYes) {
 					fmt.Println("Cancelled.")
+					os.Exit(exitcode.Cancelled)
 					return nil
 				}
 
