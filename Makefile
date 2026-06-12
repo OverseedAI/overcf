@@ -47,7 +47,7 @@ test:
 
 # Run tests in Docker (for machines without a Go toolchain)
 test-docker:
-	docker run --rm -v $(PWD):/src -w /src -v overcf-gomod:/go/pkg/mod golang:1.23 go test -v ./...
+	docker run --rm -v $(PWD):/src -w /src -v overcf-gomod:/go/pkg/mod golang:1.26 go test -v ./...
 
 # Run linter
 lint:
